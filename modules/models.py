@@ -3,8 +3,10 @@ Data models for Google Maps Reviews Scraper.
 """
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 
+from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webelement import WebElement
 
 from modules.sub_rating_labels import canonicalize_category
@@ -35,9 +37,11 @@ class RawReview:
     translations: dict = field(default_factory=dict)
 
     # CSS selector candidates — tried in order, first match wins.
+    # Verified selectors from actual Google Maps DOM (2026-07):
     MORE_BTN = (
+        "button.w8nwRe.kyuRq",
         "button.kyuRq",
-        'button[jsaction*="expandReview"]',
+        "button.w8nwRe",
         'button[aria-expanded="false"][jsaction*="review" i]',
     )
     LIKE_BTN = 'button[jsaction*="toggleThumbsUp" i]'
@@ -76,18 +80,62 @@ class RawReview:
         'div[class*="rating" i][aria-label*="/5" i]',
     )
 
+    # "More" button texts in various languages used as XPath fallback
+    _MORE_TEXTS = (
+        "Altro", "Vedi altro", "More", "See more", "Plus",
+        "Mehr", "Más", "Mais", "Показать больше",
+        "もっと見る", "更多", "더보기", "เพิ่มเติม",
+        "Daha fazla", "Xem thêm", "Więcej",
+        "Meer", "Mer", "En savoir plus",
+    )
+
+    @classmethod
+    def _click_expand(cls, card: WebElement) -> None:
+        """Try to expand truncated review text using selectors first, then XPath text match."""
+        driver = card.parent
+
+        # Ensure card is in the viewport so the expand button is interactable
+        try:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", card)
+        except Exception:
+            pass
+
+        # Strategy 1: CSS selectors
+        for sel in cls.MORE_BTN:
+            buttons = try_find(card, sel, all=True)
+            if not buttons:
+                continue
+            for b in buttons:
+                try:
+                    driver.execute_script("arguments[0].click();", b)
+                    time.sleep(0.3)
+                    return
+                except Exception:
+                    pass
+
+        # Strategy 2: XPath text match (catches unknown/rotated CSS classes)
+        for text in cls._MORE_TEXTS:
+            try:
+                xpath = (
+                    f'.//button[.//span[contains(text(), "{text}")]]'
+                    f' | .//button[contains(text(), "{text}")]'
+                    f' | .//button[contains(@aria-label, "{text}")]'
+                )
+                buttons = card.find_elements(By.XPATH, xpath)
+                for b in buttons:
+                    try:
+                        driver.execute_script("arguments[0].click();", b)
+                        time.sleep(0.3)
+                        return
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
     @classmethod
     def from_card(cls, card: WebElement) -> "RawReview":
         """Factory method to create a RawReview from a WebElement."""
-        for sel in cls.MORE_BTN:
-            buttons = try_find(card, sel, all=True)
-            if buttons:
-                for b in buttons:
-                    try:
-                        b.click()
-                    except Exception:
-                        pass
-                break
+        cls._click_expand(card)
 
         rid = card.get_attribute("data-review-id") or ""
         author = first_text(card, 'div[class*="d4r55"]')
