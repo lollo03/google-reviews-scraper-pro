@@ -207,7 +207,7 @@ class JobManager:
                 return
             for job in self.jobs.values():
                 if job.status == JobStatus.PENDING:
-                    job_id = job.id
+                    job_id = job.job_id
                     break
             else:
                 return
