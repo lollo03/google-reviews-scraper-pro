@@ -200,20 +200,36 @@ class JobManager:
             self._start_next_pending()
 
     def _start_next_pending(self) -> None:
-        """Start the next pending job if capacity is available."""
-        with self.lock:
-            running = sum(1 for j in self.jobs.values() if j.status == JobStatus.RUNNING)
-            if running >= self.max_concurrent_jobs:
-                return
-            for job in self.jobs.values():
-                if job.status == JobStatus.PENDING:
-                    job_id = job.job_id
-                    break
-            else:
+        """Start the next pending job if capacity is available.
+
+        Retries up to 3 times to handle the race between the API thread
+        calling start_job() and this method finding a pending job —
+        the lock-free gap between checking running_count and calling
+        start_job() allows the API to sneak in a new job, pushing us
+        over max_concurrent_jobs and leaving the pending job stranded.
+        """
+        import time
+        for attempt in range(3):
+            with self.lock:
+                running = sum(1 for j in self.jobs.values() if j.status == JobStatus.RUNNING)
+                if running >= self.max_concurrent_jobs:
+                    return
+                for job in self.jobs.values():
+                    if job.status == JobStatus.PENDING:
+                        job_id = job.job_id
+                        break
+                else:
+                    return
+
+            log.info(f"Auto-starting next pending job: {job_id}")
+            if self.start_job(job_id):
                 return
 
-        log.info(f"Auto-starting next pending job: {job_id}")
-        self.start_job(job_id)
+            log.warning(
+                "start_job(%s) returned False (race with API thread), "
+                "retry %d/3", job_id, attempt + 1,
+            )
+            time.sleep(0.5 * (attempt + 1))
     def get_job(self, job_id: str) -> Optional[ScrapingJob]:
         """
         Get job by ID.
