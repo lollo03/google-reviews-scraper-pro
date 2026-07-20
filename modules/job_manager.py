@@ -184,6 +184,7 @@ class JobManager:
                 job._scraper = None
 
             log.info(f"Completed scraping job {job_id}")
+            self._start_next_pending()
 
         except Exception as e:
             log.error(f"Error in scraping job {job_id}: {e}")
@@ -196,7 +197,23 @@ class JobManager:
                     job.progress = {"stage": "failed", "message": f"Job failed: {str(e)}"}
                 if job:
                     job._scraper = None
-    
+            self._start_next_pending()
+
+    def _start_next_pending(self) -> None:
+        """Start the next pending job if capacity is available."""
+        with self.lock:
+            running = sum(1 for j in self.jobs.values() if j.status == JobStatus.RUNNING)
+            if running >= self.max_concurrent_jobs:
+                return
+            for job in self.jobs.values():
+                if job.status == JobStatus.PENDING:
+                    job_id = job.id
+                    break
+            else:
+                return
+
+        log.info(f"Auto-starting next pending job: {job_id}")
+        self.start_job(job_id)
     def get_job(self, job_id: str) -> Optional[ScrapingJob]:
         """
         Get job by ID.
