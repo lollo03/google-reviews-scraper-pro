@@ -67,7 +67,7 @@ async def lifespan(app: FastAPI):
         log_file=_config.get("log_file", "scraper.log"),
     )
     log.info("Starting Google Reviews Scraper API Server")
-    job_manager = JobManager(max_concurrent_jobs=3)
+    job_manager = JobManager(max_concurrent_jobs=int(os.environ.get('SCRAPER_CONCURRENT_JOBS', '1')))
 
     db_path = _config.get("db_path", "reviews.db")
 

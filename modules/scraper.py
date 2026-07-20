@@ -291,6 +291,13 @@ class GoogleReviewsScraper:
         log.info(f"Python version: {platform.python_version()}")
         log.info("Using SeleniumBase UC Mode for enhanced anti-detection")
 
+        # Low data mode: blocks images, fonts and analytics to save proxy bandwidth.
+        # Controlled by env var LOW_DATA_MODE (default: true).
+        low_data = os.environ.get('LOW_DATA_MODE', 'true').lower() == 'true'
+        page_load = "eager" if low_data else "normal"
+        if low_data:
+            log.info("Low data mode ENABLED: images, fonts, analytics will be blocked at network level")
+
         # Determine if we're running in a container
         in_container = os.environ.get('CHROME_BIN') is not None
 
@@ -306,7 +313,7 @@ class GoogleReviewsScraper:
                         uc=True,
                         headless=headless,
                         binary_location=chrome_binary,
-                        page_load_strategy="normal"
+                        page_load_strategy=page_load
                     )
                     log.info("Successfully created SeleniumBase UC driver with custom binary")
                 except Exception as e:
@@ -315,14 +322,14 @@ class GoogleReviewsScraper:
                     driver = Driver(
                         uc=True,
                         headless=headless,
-                        page_load_strategy="normal"
+                        page_load_strategy=page_load
                     )
                     log.info("Successfully created SeleniumBase UC driver with defaults")
             else:
                 driver = Driver(
                     uc=True,
                     headless=headless,
-                    page_load_strategy="normal"
+                    page_load_strategy=page_load
                 )
                 log.info("Successfully created SeleniumBase UC driver")
         else:
@@ -332,7 +339,7 @@ class GoogleReviewsScraper:
                 driver = Driver(
                     uc=True,
                     headless=headless,
-                    page_load_strategy="normal",
+                    page_load_strategy=page_load,
                     incognito=True  # Use incognito mode for better stealth
                 )
                 log.info("Successfully created SeleniumBase UC driver")
@@ -345,6 +352,27 @@ class GoogleReviewsScraper:
 
         # Set window size
         driver.set_window_size(1400, 900)
+
+        # Block images, fonts and analytics at network level (low data / proxy mode).
+        # Uses Chrome DevTools Protocol Network.setBlockedURLs to prevent the browser
+        # from even issuing requests for these resource types.
+        if low_data:
+            try:
+                driver.execute_cdp_cmd('Network.setBlockedURLs', {
+                    'urls': [
+                        '*.googleusercontent.com/*',
+                        '*.ggpht.com/*',
+                        'khms*.google.com/*',
+                        'fonts.googleapis.com/*',
+                        'fonts.gstatic.com/*',
+                        '*.google-analytics.com/*',
+                        '*.googletagmanager.com/*',
+                        '*.doubleclick.net/*',
+                    ]
+                })
+                log.info("Network.setBlockedURLs applied for low data mode")
+            except Exception as e:
+                log.warning(f"Could not apply Network.setBlockedURLs: {e}")
 
         # Add additional stealth settings and Google Maps login-state bypass
         try:
