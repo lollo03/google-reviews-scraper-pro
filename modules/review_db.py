@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS reviews (
     engagement_hash TEXT,
     row_version    INTEGER NOT NULL DEFAULT 1,
     sub_ratings    TEXT,
+    share_url      TEXT,
     PRIMARY KEY (review_id, place_id),
     FOREIGN KEY (place_id) REFERENCES places(place_id) ON DELETE CASCADE,
     FOREIGN KEY (last_seen_session) REFERENCES scrape_sessions(session_id) ON DELETE SET NULL,
@@ -374,15 +375,16 @@ class ReviewDB:
                     "raw_date, likes, user_images, profile_url, profile_picture, "
                     "owner_responses, created_date, last_modified, last_seen_session, "
                     "last_changed_session, is_deleted, content_hash, engagement_hash, "
-                    "row_version, sub_ratings"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 1, ?)",
+                    "row_version, sub_ratings, share_url"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 1, ?, ?)",
                     (review_id, place_id, review.get("author", ""),
                      review.get("rating", 0), review_text,
                      review.get("review_date", ""), review.get("date", ""),
                      review.get("likes", 0), user_images,
                      review.get("profile", ""), review.get("avatar", ""),
                      owner_responses, now, now, session_id, session_id,
-                     content_hash, engagement_hash, sub_ratings_json)
+                     content_hash, engagement_hash, sub_ratings_json,
+                     review.get("share_url", ""))
                 )
                 self.log_history(review_id, place_id, "insert",
                                  session_id=session_id,
@@ -485,7 +487,8 @@ class ReviewDB:
                     "profile_picture = ?, owner_responses = ?, last_modified = ?, "
                     "last_seen_session = ?, last_changed_session = ?, "
                     "is_deleted = 0, content_hash = ?, engagement_hash = ?, "
-                    "sub_ratings = ?, row_version = row_version + 1 "
+                    "sub_ratings = ?, share_url = ?, "
+                    "row_version = row_version + 1 "
                     "WHERE review_id = ? AND place_id = ? AND row_version = ?",
                     (review.get("author", "") or existing.get("author", ""),
                      review.get("rating", 0) or existing.get("rating", 0),
@@ -500,6 +503,7 @@ class ReviewDB:
                      now, session_id, session_id,
                      new_content_hash, new_engagement_hash,
                      json.dumps(merged_sub_ratings, ensure_ascii=False),
+                     review.get("share_url", "") or existing.get("share_url", ""),
                      review_id, place_id, old_version)
                 )
                 if result.rowcount > 0:

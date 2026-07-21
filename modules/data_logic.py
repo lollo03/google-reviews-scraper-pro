@@ -30,6 +30,7 @@ def merge_review(existing: Dict[str, Any] | None, raw: RawReview) -> Dict[str, A
             "owner_responses": {},
             "created_date": get_current_iso_date(),
             "review_date": raw.review_date or "",
+            "share_url": raw.share_url or "",
         }
     else:
         # Handle existing reviews with old field names - migrate them

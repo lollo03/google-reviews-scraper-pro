@@ -318,6 +318,7 @@ class ReviewResponse(BaseModel):
     content_hash: Optional[str] = None
     engagement_hash: Optional[str] = None
     row_version: int = 1
+    share_url: Optional[str] = None
 
 
 class PaginatedReviewsResponse(BaseModel):

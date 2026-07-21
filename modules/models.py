@@ -35,6 +35,7 @@ class RawReview:
     review_date: str = ""
     sub_ratings: dict = field(default_factory=dict)
     translations: dict = field(default_factory=dict)
+    share_url: str = ""
 
     # CSS selector candidates — tried in order, first match wins.
     # Verified selectors from actual Google Maps DOM (2026-07):
@@ -221,6 +222,7 @@ class RawReview:
             owner_text=owner_text,
             review_date=review_date,
             sub_ratings=sub_ratings,
+            share_url="",
         )
 
     @classmethod

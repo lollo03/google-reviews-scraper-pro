@@ -278,6 +278,7 @@ class GoogleReviewsScraper:
             "created_date": db_review.get("created_date", ""),
             "review_date": db_review.get("review_date", ""),
             "last_modified_date": db_review.get("last_modified", ""),
+            "share_url": db_review.get("share_url", ""),
         }
 
     def setup_driver(self, headless: bool):
@@ -556,6 +557,75 @@ class GoogleReviewsScraper:
         if match:
             return match.group(1), match.group(2)
         return None, None
+
+    def _extract_share_url(self, driver: Chrome, card: WebElement) -> str:
+        """
+        Click the 'Share' button on a review card, read the share URL from
+        the modal dialog, dismiss it, and return the URL.
+
+        Language-agnostic — uses jsaction selectors that don't change with locale.
+        """
+        share_btn_selectors = (
+            'button[jsaction*="review.share" i]',
+            'button[aria-label*="Condividi" i]',
+            'button[aria-label*="Share" i]',
+            'button[aria-label*="Teilen" i]',
+            'button[aria-label*="Partager" i]',
+            'button[aria-label*="Compartir" i]',
+            'button[aria-label*="共有" i]',
+            'button.gllhef',
+        )
+        close_btn_selectors = (
+            'button[jsaction="modal.close"]',
+            'button[aria-label="Chiudi"]',
+            'button[aria-label="Close"]',
+            'button[aria-label="Schließen"]',
+            'button[aria-label="Fermer"]',
+            'button[aria-label="Cerrar"]',
+        )
+        input_selectors = (
+            'input.vrsrZe',
+            'input[type="text"][readonly]',
+            'input[jsaction*="clickInput"]',
+        )
+
+        for sel in share_btn_selectors:
+            try:
+                btns = card.find_elements(By.CSS_SELECTOR, sel)
+                for btn in btns:
+                    if not btn.is_displayed():
+                        continue
+                    driver.execute_script("arguments[0].click();", btn)
+                    time.sleep(0.6)
+                    share_url = ""
+                    for input_sel in input_selectors:
+                        try:
+                            inputs = driver.find_elements(By.CSS_SELECTOR, input_sel)
+                            for inp in inputs:
+                                if inp.is_displayed():
+                                    val = (inp.get_attribute("value") or "").strip()
+                                    if val:
+                                        share_url = val
+                                        break
+                            if share_url:
+                                break
+                        except Exception:
+                            continue
+                    for close_sel in close_btn_selectors:
+                        try:
+                            close_btns = driver.find_elements(By.CSS_SELECTOR, close_sel)
+                            for cb in close_btns:
+                                if cb.is_displayed():
+                                    driver.execute_script("arguments[0].click();", cb)
+                                    time.sleep(0.3)
+                                    break
+                            break
+                        except Exception:
+                            continue
+                    return share_url
+            except Exception:
+                continue
+        return ""
 
     def navigate_to_place(self, driver: Chrome, url: str, wait: WebDriverWait) -> bool:
         """
@@ -1813,6 +1883,7 @@ class GoogleReviewsScraper:
                             "owner_text": raw.owner_text,
                             "photos": raw.photos,
                             "sub_ratings": raw.sub_ratings,
+                            "share_url": self._extract_share_url(driver, card) if raw.text else "",
                         }
                         result = self.review_db.upsert_review(
                             place_id, review_dict, session_id,
