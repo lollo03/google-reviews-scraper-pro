@@ -336,7 +336,9 @@ class RawReview:
     owner_date: str                  # Business owner response date
     owner_text: str                  # Business owner response text
     review_date: str                 # Parsed ISO date
+    sub_ratings: dict                # Per-category ratings
     translations: dict               # Future: Translated versions
+    share_url: str                   # Share link (extracted via modal click)
 ```
 
 **Extraction Method**: `from_card(card: WebElement)`
@@ -762,7 +764,8 @@ def save_reviews(reviews: Dict[str, Dict[str, Any]]):
   "original_image_urls": [          // Original Google URLs (optional)
     "https://lh3.googleusercontent.com/..."
   ],
-  "original_profile_picture": "https://lh3.googleusercontent.com/..."
+  "original_profile_picture": "https://lh3.googleusercontent.com/...",
+  "share_url": "https://maps.app.goo.gl/LCupXiokH5UYUpxc7"
 }
 ```
 
