@@ -520,7 +520,9 @@ years = num * 365   # Approximation
 │    │   ├─ Get data-review-id                                  │
 │    │   ├─ Skip if in 'seen' set                               │
 │    │   ├─ RawReview.from_card(card)                           │
-│    │   ├─ Add to docs dict                                    │
+│    │   ├─ Extract share_url via modal click                   │
+│    │   ├─ Upsert into SQLite (upsert_review)                  │
+│    │   ├─ Incremental MongoDB upsert (write-through)          │
 │    │   └─ Add ID to seen set                                  │
 │    ├─ Dynamic sleep (0.7s if many cards, else 1.0s)           │
 │    └─ Exit conditions:                                        │
@@ -531,12 +533,14 @@ years = num * 365   # Approximation
              │
              v
 ┌──────────────────────────────────────────────────────────────┐
-│ 5. DATA ENRICHMENT                                            │
-│    ├─ Merge with existing reviews (merge_review)              │
-│    ├─ Convert relative dates to ISO format                    │
-│    ├─ Detect language for each text field                     │
-│    ├─ Add created_date, last_modified_date                    │
-│    └─ Inject custom_params into each document                 │
+│ 5. POST-SCRAPE PIPELINE (per scopi futuri e processing)       │
+│    ├─ DateTask: converti date str → datetime                   │
+│    ├─ ImageTask: download immagini (se abilitato)              │
+│    ├─ S3Task: upload su S3/MinIO (se abilitato)                │
+│    ├─ CleanupTask: pulizia path locali/URL originali           │
+│    ├─ CustomParamsTask: aggiungi campi custom                  │
+│    ├─ MongoDBTask: bulk_write di riconciliaz. finale           │
+│    └─ JSONTask: backup su file (se abilitato)                  │
 └────────────┬─────────────────────────────────────────────────┘
              │
              v
@@ -560,15 +564,14 @@ years = num * 365   # Approximation
              │
              v
 ┌──────────────────────────────────────────────────────────────┐
-│ 7. STORAGE                                                    │
-│    ├─ MongoDB (if use_mongodb=True)                           │
-│    │   ├─ Bulk upsert: UpdateOne({review_id}, {$set: doc})    │
-│    │   ├─ Create index on review_id                           │
-│    │   └─ Log upserted/modified counts                        │
-│    └─ JSON Backup (if backup_to_json=True)                    │
-│        ├─ Write to google_reviews.json                        │
-│        ├─ Write seen IDs to google_reviews.ids                │
-│        └─ Convert datetime objects to ISO strings             │
+│ 7. STORAGE (DOPPIO BINARIO)                                   │
+│    ├─ Scrittura incrementale (durante il loop):                │
+│    │   ├─ SQLite: upsert_review() per ogni card               │
+│    │   └─ MongoDB: _sync_review_to_mongo() write-through      │
+│    │       con date convertite in datetime                     │
+│    └─ Pipeline finale (dopo il loop):                          │
+│        ├─ MongoDB bulk_write di riconciliazione               │
+│        └─ JSON backup (se backup_to_json=True)                │
 └────────────┬─────────────────────────────────────────────────┘
              │
              v
