@@ -10,6 +10,7 @@ import re
 import threading
 import time
 import traceback
+from datetime import datetime, timezone
 from typing import Dict, Any, List
 
 from seleniumbase import Driver
@@ -247,6 +248,7 @@ class GoogleReviewsScraper:
         db_path = config.get("db_path", "reviews.db")
         self.review_db = ReviewDB(db_path)
         self._selector_health: SelectorHealth | None = None
+        self._mongo_storage = None
 
     def _record_selector(self, selector: str, outcome: str) -> None:
         """Telemetry helper — always safe to call."""
@@ -626,6 +628,71 @@ class GoogleReviewsScraper:
             except Exception:
                 continue
         return ""
+
+    def _ensure_mongo(self):
+        """Lazy-init MongoDB storage for incremental sync."""
+        if self._mongo_storage is None and self.config.get("use_mongodb", False):
+            from modules.data_storage import MongoDBStorage
+            self._mongo_storage = MongoDBStorage(config=self.config)
+            self._mongo_storage.connect()
+
+    @staticmethod
+    def _raw_to_mongo_doc(review_dict: Dict[str, Any], place_id: str) -> Dict[str, Any]:
+        """Convert a raw review_dict (from the scraper loop) to a MongoDB-ready document."""
+        text = review_dict.get("text", "")
+        lang = review_dict.get("lang", "en")
+        description = {lang: text} if text else {}
+
+        owner_text = review_dict.get("owner_text", "")
+        owner_responses: Dict[str, Any] = {}
+        if owner_text:
+            from modules.utils import detect_lang
+            owner_lang = detect_lang(owner_text)
+            owner_responses = {owner_lang: {"text": owner_text}}
+
+        now = datetime.now(timezone.utc)
+
+        doc = {
+            "review_id": review_dict.get("review_id", ""),
+            "place_id": place_id,
+            "author": review_dict.get("author", ""),
+            "rating": review_dict.get("rating", 0),
+            "description": description,
+            "likes": review_dict.get("likes", 0),
+            "user_images": review_dict.get("photos", []),
+            "author_profile_url": review_dict.get("profile", ""),
+            "profile_picture": review_dict.get("avatar", ""),
+            "owner_responses": owner_responses,
+            "sub_ratings": review_dict.get("sub_ratings", {}),
+            "created_date": now.isoformat(),
+            "review_date": review_dict.get("review_date", ""),
+            "last_modified_date": now.isoformat(),
+            "share_url": review_dict.get("share_url", ""),
+        }
+
+        for field in ("created_date", "last_modified_date", "review_date"):
+            val = doc.get(field)
+            if isinstance(val, str) and val:
+                try:
+                    doc[field] = datetime.fromisoformat(val.replace("Z", "+00:00"))
+                except (ValueError, TypeError):
+                    doc[field] = now
+        return doc
+
+    def _sync_review_to_mongo(self, review_dict: Dict[str, Any], place_id: str) -> None:
+        """Incrementally write a single review to MongoDB (upsert by review_id)."""
+        self._ensure_mongo()
+        if self._mongo_storage is None or not self._mongo_storage.connected:
+            return
+        doc = self._raw_to_mongo_doc(review_dict, place_id)
+        try:
+            self._mongo_storage.collection.update_one(
+                {"review_id": doc["review_id"]},
+                {"$set": doc},
+                upsert=True,
+            )
+        except Exception:
+            log.debug("Failed to incrementally sync review %s to MongoDB", doc.get("review_id"))
 
     def navigate_to_place(self, driver: Chrome, url: str, wait: WebDriverWait) -> bool:
         """
@@ -1892,6 +1959,7 @@ class GoogleReviewsScraper:
                         batch_stats[result] = batch_stats.get(result, 0) + 1
                         if result != "unchanged":
                             changed_ids.add(raw.id)
+                            self._sync_review_to_mongo(review_dict, place_id)
                         if result == "unchanged":
                             batch_unchanged += 1
                         seen.add(raw.id)
@@ -2135,6 +2203,11 @@ class GoogleReviewsScraper:
             return False
 
         finally:
+            if self._mongo_storage is not None:
+                try:
+                    self._mongo_storage.close()
+                except Exception:
+                    pass
             if driver is not None:
                 try:
                     driver.quit()
